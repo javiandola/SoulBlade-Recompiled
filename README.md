@@ -190,3 +190,23 @@ nothing over it.
 This repository has a **fresh, audited history**. The private development history was not published
 because it contained large build artefacts and paths of the author's machine; only the reviewed tree
 is here, in a small number of commits.
+
+---
+
+## Reproduction check (performed before publication)
+
+The whole flow was executed from a **fresh clone** of this repository, with the disc kept outside
+the tree, on CachyOS (Ryzen 5 5500, RX 6600 XT):
+
+| step | result |
+|---|---|
+| `git clone` | 42 files, 2 commits, no game data |
+| `scripts/fetch-framework.sh` | psxrecomp `31df2e1e` + 4 patches + 2 submodules |
+| `scripts/generate.sh` | 62 files / 76 MB written to `generated/` from the local disc |
+| `scripts/build.sh` | `SoulBlade_Recompiled`, 40 341 264 B |
+| `package/build-appimage.sh` | AppImage built and verified (`--verify-only`: OK) |
+| run the built AppImage | `disc region NTSC-U (serial SLUS-00240)`, 60.0 fps |
+
+The AppImage built from the clone is **not byte-identical** to any other build (squashfs ordering and
+timestamps differ); its size was 371 304 952 B against 371 300 856 B for the reference build. What
+matters is that it verifies and runs. `generated/` and `disc/` never left the working tree.
