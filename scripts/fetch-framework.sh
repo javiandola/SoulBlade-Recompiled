@@ -30,6 +30,13 @@ git -C "$FW" checkout --quiet --detach "$PIN" 2>/dev/null \
     || git -C "$FW" fetch --quiet origin "$PIN" && git -C "$FW" checkout --quiet --detach "$PIN"
 echo "   HEAD: $(git -C "$FW" rev-parse --short HEAD)"
 
+echo "== submodulos (retcomm-rbengine: backend del rebobinado) =="
+git -C "$FW" submodule update --init --recursive \
+    || die "no se pudieron inicializar los submodulos (revisa la red)"
+for sub in lib/recomp-net lib/retcomm-rbengine; do
+    [ -n "$(ls -A "$FW/$sub" 2>/dev/null)" ] || die "submodulo vacio: $sub"
+done
+
 echo "== parches =="
 shopt -s nullglob
 count=0
