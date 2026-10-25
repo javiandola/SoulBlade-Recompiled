@@ -1,0 +1,193 @@
+From 25899d51371be146ca4693a55703b35435b64904 Mon Sep 17 00:00:00 2001
+From: SoulBlade Port <port@localhost>
+Date: Sun, 25 Oct 2026 09:56:38 +0100
+Subject: [PATCH 4/4] runtime: separar recursos empaquetados de estado
+ escribible (AppImage)
+
+- bundle_dir_from_argv(): directorio real del binario via /proc/self/exe, sin $APPIMAGE.
+  Usado para el BIOS incluido, mods/ y overlay_toolchain/.
+- resolve_bios_path(): recorre el anclaje del paquete y el escribible.
+- save_state(): EROFS/EACCES avisa y continua en vez de impedir el arranque.
+- package_appimage.sh: enlaza bios/ y mods/ desde usr/bin (el runtime los busca junto a argv[0]).
+---
+ runtime/src/main.cpp         | 70 +++++++++++++++++++++++++++---------
+ runtime/src/mod_packages.cpp | 16 +++++++++
+ tools/package_appimage.sh    |  4 +++
+ 3 files changed, 73 insertions(+), 17 deletions(-)
+
+diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
+index fc425137..5a6ea3bc 100644
+--- a/runtime/src/main.cpp
++++ b/runtime/src/main.cpp
+@@ -3078,6 +3078,29 @@ static std::filesystem::path exe_dir_from_argv(const char* argv0) {
+     return exe_dir;
+ }
+ 
++/* Directory holding the READ-ONLY resources shipped with the binary (the
++ * bundled BIOS, mods/, overlay_toolchain/, assets/). Inside an AppImage those
++ * live in the mounted AppDir, NOT next to the .AppImage file, so $APPIMAGE must
++ * never be used here: exe_dir_from_argv() deliberately prefers $APPIMAGE for
++ * settings and cards (writable, portable next to the package). Using it for
++ * resources made every AppImage report "Bundled BIOS Missing". */
++static std::filesystem::path bundle_dir_from_argv(const char* argv0) {
++    namespace fs = std::filesystem;
++    std::error_code ec;
++#if defined(__linux__)
++    // The real image: does not go through $APPIMAGE and survives a symlinked
++    // or PATH-launched argv[0].
++    if (fs::path real = fs::read_symlink("/proc/self/exe", ec); !ec && !real.empty()) {
++        return real.parent_path();
++    }
++    ec.clear();
++#endif
++    if (argv0 && argv0[0]) {
++        if (fs::path p = PSXRecompV4::host_absolute(argv0, ec); !ec) return p.parent_path();
++    }
++    return exe_dir_from_argv(argv0);
++}
++
+ static std::filesystem::path resolve_existing_runtime_path(const char* requested,
+                                                            const char* argv0) {
+     namespace fs = std::filesystem;
+@@ -3088,12 +3111,16 @@ static std::filesystem::path resolve_existing_runtime_path(const char* requested
+     if (fs::exists(p, ec)) return PSXRecompV4::host_absolute(p, ec);
+     if (PSXRecompV4::host_path_is_absolute(p)) return {};
+ 
+-    // Anchor exclusively on the exe directory — never cwd (see exe_dir_from_argv).
+-    const fs::path root = exe_dir_from_argv(argv0);
+-    fs::path direct = root / p;
+-    if (fs::exists(direct, ec)) return PSXRecompV4::host_absolute(direct, ec);
+-    fs::path found = find_upward(root, p);
+-    if (!found.empty()) return PSXRecompV4::host_absolute(found / p, ec);
++    // Anchor on the writable anchor (settings/cards next to the binary or the
++    // .AppImage) first, then on the read-only bundle (mounted AppDir): inside an
++    // AppImage the shipped resources are not next to the .AppImage file.
++    const fs::path roots[2] = { exe_dir_from_argv(argv0), bundle_dir_from_argv(argv0) };
++    for (const fs::path& root : roots) {
++        fs::path direct = root / p;
++        if (fs::exists(direct, ec)) return PSXRecompV4::host_absolute(direct, ec);
++        fs::path found = find_upward(root, p);
++        if (!found.empty()) return PSXRecompV4::host_absolute(found / p, ec);
++    }
+     return {};
+ }
+ 
+@@ -3671,16 +3698,22 @@ static std::filesystem::path resolve_bios_path(const char* requested, const char
+     }
+     if (PSXRecompV4::host_path_is_absolute(p)) return p;
+ 
+-    // Anchor on the exe directory — never cwd (see exe_dir_from_argv).
+-    fs::path found = find_upward(exe_dir_from_argv(argv0), p);
+-    if (!found.empty()) return found / p;
++    // Anchor on the read-only bundle first (inside an AppImage the shipped BIOS
++    // lives in the mounted AppDir, not next to the .AppImage), then on the
++    // writable anchor next to the binary/package. Never cwd.
++    for (const fs::path& root : { bundle_dir_from_argv(argv0), exe_dir_from_argv(argv0) }) {
++        fs::path found = find_upward(root, p);
++        if (!found.empty()) return found / p;
++    }
+     // Same walk, accepting the other naming convention at each rung: the
+     // literal name is absent but a region-qualified sibling may be present.
+-    for (fs::path dir = PSXRecompV4::host_absolute(exe_dir_from_argv(argv0), ec);
+-         !dir.empty(); dir = dir.parent_path()) {
+-        const fs::path aliased = PSXRecompV4::resolve_bios_rom(dir / p);
+-        if (aliased != dir / p && fs::exists(aliased, ec)) return aliased;
+-        if (!dir.has_parent_path() || dir.parent_path() == dir) break;
++    for (const fs::path& root : { bundle_dir_from_argv(argv0), exe_dir_from_argv(argv0) }) {
++        for (fs::path dir = PSXRecompV4::host_absolute(root, ec);
++             !dir.empty(); dir = dir.parent_path()) {
++            const fs::path aliased = PSXRecompV4::resolve_bios_rom(dir / p);
++            if (aliased != dir / p && fs::exists(aliased, ec)) return aliased;
++            if (!dir.has_parent_path() || dir.parent_path() == dir) break;
++        }
+     }
+ 
+     // Dev-checkout rung: game projects keep the framework at
+@@ -3690,7 +3723,7 @@ static std::filesystem::path resolve_bios_path(const char* requested, const char
+     // resolve a build-machine BIOS there — it falls through to bios.cfg or the
+     // interactive picker.
+     const fs::path dev_marker = fs::path("psxrecomp-v4") / p;
+-    found = find_upward(exe_dir_from_argv(argv0), dev_marker);
++    const fs::path found = find_upward(exe_dir_from_argv(argv0), dev_marker);
+     if (!found.empty()) return found / dev_marker;
+     return p;
+ }
+@@ -19021,7 +19054,7 @@ int main(int argc, char** argv) {
+     {
+         std::string mod_error;
+         if (!PSXRecompV4::mod_runtime_initialize(
+-                exe_dir_from_argv(argv[0]) / "mods", game_id,
++                bundle_dir_from_argv(argv[0]) / "mods", game_id,
+                 game_entry_pc, text_guard_exe_path, &mod_error)) {
+             std::fprintf(stderr, "psxrecomp: mods unavailable: %s\n",
+                          mod_error.c_str());
+@@ -19095,7 +19128,10 @@ int main(int argc, char** argv) {
+          * dev box and tcc shards on a toolchain-less player box. */
+         extern int g_psx_cps_mode;
+         const std::filesystem::path tk_xd = exe_dir_from_argv(argv[0]);
+-        const std::filesystem::path tk_dir = tk_xd / "overlay_toolchain";
++        /* The toolchain is a shipped read-only resource (inside the AppDir when
++         * packaged), while cache/ is written at run time and must stay on the
++         * writable anchor next to the binary/AppImage. */
++        const std::filesystem::path tk_dir = bundle_dir_from_argv(argv[0]) / "overlay_toolchain";
+         /* The bundle's layout is identical on every platform; only the file
+          * NAMES differ. These were hardcoded to the Windows spellings
+          * ("python/python.exe", "psxrecomp-game.exe", "tcc/tcc.exe"), so on
+diff --git a/runtime/src/mod_packages.cpp b/runtime/src/mod_packages.cpp
+index 3409c467..484c2283 100644
+--- a/runtime/src/mod_packages.cpp
++++ b/runtime/src/mod_packages.cpp
+@@ -10,6 +10,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cctype>
++#include <cerrno>
+ #include <cstdio>
+ #include <fstream>
+ #include <iomanip>
+@@ -2928,15 +2929,30 @@ bool ModPackageManager::load_state(std::string* error) {
+ 
+ bool ModPackageManager::save_state(std::string* error) const {
+     std::error_code ec;
++    /* A read-only install (an AppImage mount, a system-wide package) cannot keep
++     * the selection on disk. Refusing to start the game over that is worse than
++     * not persisting it, so warn once and carry on. */
++    auto read_only_root = [this](int err) {
++        if (err != EROFS && err != EACCES) return false;
++        std::fprintf(stderr,
++                     "psxrecomp: mods state not persisted (read-only mods root %s)\n",
++                     root_.string().c_str());
++        return true;
++    };
+     fs::create_directories(root_, ec);
+     if (ec) {
++        errno = 0;
++        if (read_only_root(ec.value())) return true;
+         set_error(error, "cannot create mods directory: " + ec.message());
+         return false;
+     }
+     const fs::path temp = root_ / "state.toml.tmp";
+     const fs::path final = root_ / "state.toml";
++    errno = 0;
+     std::ofstream out(temp, std::ios::trunc);
+     if (!out) {
++        const int saved = errno;
++        if (read_only_root(saved)) return true;
+         set_error(error, "cannot write " + temp.string());
+         return false;
+     }
+diff --git a/tools/package_appimage.sh b/tools/package_appimage.sh
+index 2c9bc641..07ba80d4 100755
+--- a/tools/package_appimage.sh
++++ b/tools/package_appimage.sh
+@@ -90,6 +90,10 @@ install -m 0644 "$ICON" "$APPDIR/$DESKTOP_ID.png"
+ ln -s "$DESKTOP_ID.png" "$APPDIR/.DirIcon"
+ # SDL resolves UI resources from the real ELF, rather than writable argv[0].
+ ln -s "../share/$PAYLOAD_NAME/assets" "$APPDIR/usr/bin/assets"
++# The runtime resolves the bundled BIOS and the mod catalogue next to argv[0]
++# (exe_dir/bios, exe_dir/mods), so they must be reachable from usr/bin.
++if [ -d "$DATA/bios" ]; then ln -s "../share/$PAYLOAD_NAME/bios" "$APPDIR/usr/bin/bios"; fi
++if [ -d "$DATA/mods" ]; then ln -s "../share/$PAYLOAD_NAME/mods" "$APPDIR/usr/bin/mods"; fi
+ HELPER="$FRAMEWORK/tools/release_stage.py"
+ # Official GitHub asset digests checked 2026-10-07 UTC; versioned releases
+ # avoid drifting continuous URLs. Asset IDs313839329/324406736 respectively.

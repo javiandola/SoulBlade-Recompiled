@@ -1,0 +1,85 @@
+#!/bin/bash
+# AppRun de Soul Blade Recompiled.
+#
+# Objetivos:
+#  - localizar el AppDir aunque se lance desde otra ruta, con espacios o por enlace;
+#  - pasar el disco incluido con --disc (la clave `disc` de game.toml NO la usa el
+#    runtime: se comprobo ejecutando la release, ver T27 y requisitos-empaquetado.md §8);
+#  - dejar los datos escribibles (game.toml + tarjetas) fuera del paquete, que es
+#    de solo lectura;
+#  - no tocar las bibliotecas del sistema: el ejecutable resuelve las suyas por
+#    RUNPATH ($ORIGIN/../lib) sin exportar LD_LIBRARY_PATH a los hijos.
+set -eu
+
+# $APPDIR lo define el runtime de AppImage; si se ejecuta desde un AppDir sin
+# empaquetar, se deduce del propio AppRun resolviendo enlaces.
+if [ -n "${APPDIR:-}" ]; then
+    APPDIR_REAL="$APPDIR"
+else
+    APPDIR_REAL="$(dirname "$(readlink -f "$0")")"
+fi
+
+SHARE="$APPDIR_REAL/usr/share/soulblade"
+EXE="$APPDIR_REAL/usr/bin/SoulBlade_Recompiled"
+DISC="$SHARE/disc/Soul Blade (v1.1).cue"
+
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/soulblade"
+SAVES="$DATA/saves"
+mkdir -p "$SAVES"
+
+if [ ! -x "$EXE" ]; then
+    echo "SoulBlade: no se encuentra el ejecutable en $EXE" >&2
+    exit 1
+fi
+if [ ! -f "$DISC" ]; then
+    echo "SoulBlade: no se encuentra la imagen del juego en $DISC" >&2
+    exit 1
+fi
+if [ ! -f "$SHARE/disc/Soul Blade (v1.1).bin" ]; then
+    echo "SoulBlade: falta el BIN junto al CUE; el CUE lo referencia por nombre relativo" >&2
+    exit 1
+fi
+
+# game.toml escribible: se parte del del paquete la primera vez y se conserva el
+# del usuario despues (ahi viven las preferencias). memcard_dir = "saves" se
+# resuelve contra el directorio del game.toml, que es $DATA.
+if [ ! -f "$DATA/game.toml" ]; then
+    cp "$SHARE/game.toml" "$DATA/game.toml"
+fi
+
+export SOULBLADE_APPDIR="$APPDIR_REAL"
+
+# Lanzado desde SSH, desde un servicio o desde un lanzador que no hereda el
+# entorno del escritorio, no llegan WAYLAND_DISPLAY ni DISPLAY y SDL3 responde
+# "No available video device" aunque el compositor este vivo. Se deducen del
+# compositor del propio usuario, sin tocar la configuracion de la sesion.
+if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/gamescope-*; do
+        [ -S "$sock" ] || continue
+        case "$sock" in *.lock|*-ei) continue ;; esac
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
+    done
+fi
+# Sin compositor Wayland accesible, Xwayland/X11 sigue sirviendo de respaldo.
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
+    export DISPLAY=:0
+fi
+# El almacen de capturas de overlays es estado escribible: sin esto el runtime
+# lo crearia junto al .AppImage (o dentro del montaje, que es de solo lectura).
+# El ejecutable lleva RUNPATH=$ORIGIN/../lib (lo fija linuxdeploy), asi que las
+# bibliotecas empaquetadas se resuelven solas. No se exporta LD_LIBRARY_PATH:
+# se filtraba a los procesos hijos (zenity, etc.) y les imponia nuestro
+# libcrypto frente al del sistema, que es justo lo que hay que evitar.
+export PSX_OVERLAY_CAPTURES="$DATA/overlay_captures.json"
+
+# El BIOS por defecto se busca en <dir del ejecutable>/bios, que dentro del
+# AppDir es de solo lectura y no queremos duplicar; se pasa explícito.
+BIOS="$SHARE/bios/openbios.bin"
+if [ -f "$BIOS" ]; then
+    exec "$EXE" --game "$DATA/game.toml" --disc "$DISC" --bios "$BIOS" "$@"
+fi
+exec "$EXE" --game "$DATA/game.toml" --disc "$DISC" "$@"

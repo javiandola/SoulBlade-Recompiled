@@ -1,0 +1,46 @@
+From c2165c7354b1af38e90f36e4bf951df42b86212e Mon Sep 17 00:00:00 2001
+From: SoulBlade Port <port@localhost>
+Date: Sun, 25 Oct 2026 01:44:54 +0200
+Subject: [PATCH 3/4] tests: C11 en el proyecto del runtime y stub de
+ psx_mod_host_output_scope
+
+- CMAKE_C_STANDARD 99 -> 11: el propio runtime pide c_std_11 (atomicos C11 en
+  audio_trace.c). Con C99, dma.c no ve timespec_get/TIME_UTC y ~170 targets de
+  prueba no construian.
+- test_mod_texture_banks: stub del servicio de host que usa mod_texture_banks.c.
+- El area sio/card/memcard queda 11/11 en verde (antes 5 no compilaban).
+---
+ runtime/CMakeLists.txt                 | 5 ++++-
+ runtime/tests/test_mod_texture_banks.c | 3 +++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
+index 94028664..75bc9971 100644
+--- a/runtime/CMakeLists.txt
++++ b/runtime/CMakeLists.txt
+@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.20)
+ project(psxrecomp-runtime C CXX)
+ include(CTest)
+ 
+-set(CMAKE_C_STANDARD 99)
++# C11 (antes 99): el runtime lo exige — audio_trace.c usa atómicos C11 y el
++# target pide c_std_11. Con C99, dma.c no ve timespec_get/TIME_UTC y los targets
++# de test que lo compilan directamente no enlazan (214 pruebas sin construir).
++set(CMAKE_C_STANDARD 11)
+ set(CMAKE_CXX_STANDARD 17)
+ 
+ # ---- Native/oracle runtime targets ----
+diff --git a/runtime/tests/test_mod_texture_banks.c b/runtime/tests/test_mod_texture_banks.c
+index 2bd255f5..2ed8c34d 100644
+--- a/runtime/tests/test_mod_texture_banks.c
++++ b/runtime/tests/test_mod_texture_banks.c
+@@ -2,6 +2,9 @@
+ #include "mod_memory.h"
+ #include "mod_texture_banks.h"
+ #include <stdio.h>
++/* Stub del servicio de host que usa mod_texture_banks.c; este target no compila
++ * mod_guest_services.c, asi que sin el no enlazaba (fallo preexistente). */
++int psx_mod_host_output_scope(void) { return 0; }
+ #include <stdlib.h>
+ #include <string.h>
+ #include <math.h>

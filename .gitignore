@@ -1,0 +1,45 @@
+# --- Game data: never tracked ------------------------------------------------
+*.bin
+*.cue
+*.psv
+*.mcd
+*.mcr
+*.iso
+*.chd
+disc/
+saves/
+overlay_captures.json
+overlay_captures.json.d/
+
+# --- Generated from the game's machine code: your own copy, your own machine -
+generated/
+static-overlays/
+
+# --- Framework checkout (scripts/fetch-framework.sh) -------------------------
+source/SoulBladeRecomp/psxrecomp/
+
+# --- Build trees -------------------------------------------------------------
+build*/
+build-*/
+source/SoulBladeRecomp/build-*/
+source/SoulBladeRecomp/psxrecomp/runtime/build-*/
+
+# --- Packaging artefacts -----------------------------------------------------
+package/payload/
+package/debug-payload/
+package/out/
+package/appdir-test/
+package/*.log
+
+# --- Local configuration and capture files -----------------------------------
+settings.toml
+input.ini
+bios/openbios.bin
+bios/SCPH1001.BIN
+bios/*.BIN
+*.execution.json
+
+# --- Editor / OS noise -------------------------------------------------------
+.DS_Store
+*.swp
+__pycache__/

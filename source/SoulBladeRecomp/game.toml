@@ -1,0 +1,68 @@
+# Autofilled by tools/new_project_layout/probe_disc.py from your legal dump.
+# Review before shipping. Runtime quirks / overlay seeds still need hand work.
+
+[game]
+name = "SoulBlade"
+id = "SLUS-00240"
+players = 2
+exe = "disc/SLUS_002.40"
+disc = "disc/Soul Blade (v1.1).cue"
+load_address = "0x80010000"
+entry_pc = "0x80010FBC"
+text_size = "0x000FC000"
+stack_base = "0x801FFFF0"
+
+# Digests are for data Track 01 (first BINARY FILE / TRACK 01).
+[prepare_disc]
+out_dir = "disc"
+bin_name = "Soul Blade (v1.1).bin"
+cue_name = "Soul Blade (v1.1).cue"
+boot_exe = "SLUS_002.40"
+known_sizes = [527412480]
+known_md5 = [
+  "055175fbf6e6e48caea1fad0664f42af",
+]
+known_sha1 = [
+  "e1a48d3e5c3614be1a5f3fe7f1f4036dbc6c5b94",
+]
+known_crc32 = [
+  "aa74b3c9",
+]
+
+[recompiler]
+seeds = "seeds/ghidra_funcs.txt"
+out_dir = "generated"
+strict = true
+
+[runtime]
+window_title = "SoulBlade Recompiled"
+memcard_dir = "saves"
+overlay_cache = true
+# 0x80096000 contiene un overlay que el juego copia de si mismo (sectores 293-298
+# del EXE) y ejecuta en el sitio. Sin bajar el suelo, el cargador dinamico no
+# sondea esa region ("checked" solo incluia 0x110000) y todo ese codigo caia al
+# interprete: 287.482 despachos en un combate. Con el suelo en 0x96000 la region
+# se sirve desde la cache de shards y baja a 0. Ver docs/overlays-aot.md §19.
+overlay_region_floor = "0x96000"
+
+[video]
+renderer = "opengl"
+aspect_ratio = "4:3"
+
+[controller]
+default_mode = "digital"
+# Fuerza que el asiento 1 use el primer mando SDL disponible.
+# Necesario porque el runtime solo pone "auto" si está definido PSX_DEBUG_TOOLS,
+# macro que no define ninguna de nuestras dos builds (ver docs/decisiones-tecnicas.md D10):
+# sin esta línea el jugador 1 queda en teclado y el mando nunca se abre.
+p1_device = "auto"
+# Asiento 2: el siguiente mando libre. Con un solo mando conectado el jugador 2
+# se queda sin dispositivo (no roba el del jugador 1); con dos, cada uno coge el suyo.
+p2_device = "auto"
+
+# Online mount gate: digests + track count + optional TOC fingerprint
+# (see docs/NETPLAY.md).
+[netplay]
+require_cue = true
+required_tracks = 1
+required_disc_fp = "f28e869b8d07728a4b86cfe89a89872013f1a7331b483b1346677957205da19c"

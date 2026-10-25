@@ -1,0 +1,153 @@
+From 66cbc3a2cf3f7b5ee8d67a46466d792e2dcb25f5 Mon Sep 17 00:00:00 2001
+From: SoulBlade Port <port@localhost>
+Date: Sun, 25 Oct 2026 01:10:16 +0200
+Subject: [PATCH 1/4] memcard: diagnostico de escrituras y validacion opt-in
+ del checksum interno del frame
+
+- PSX_MC_WRITE_LOG=1 registra sector, byte 0x7F, XOR 0x00..0x7E y el checksum
+  de transaccion enviado/esperado. Desactivado por defecto.
+- PSX_MC_STRICT_FRAME_CHK=1 rechaza (end byte 4Eh) los frames cuyo checksum
+  interno no cuadra, como haria una tarjeta real. Desactivado por defecto para
+  no romper el guardado actual.
+- test_sio_card_protocol: nuevo caso con 7 comprobaciones (por defecto acepta y
+  almacena verbatim; en estricto rechaza y no escribe; en estricto con frame
+  coherente acepta).
+---
+ runtime/src/sio.c                      | 44 ++++++++++++++++++++-
+ runtime/tests/test_sio_card_protocol.c | 53 ++++++++++++++++++++++++++
+ 2 files changed, 96 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/src/sio.c b/runtime/src/sio.c
+index e85f8b46..447c1611 100644
+--- a/runtime/src/sio.c
++++ b/runtime/src/sio.c
+@@ -19,6 +19,7 @@
+ #include "event_ring.h"
+ #include <stdlib.h>
+ #include <string.h>
++#include <stdio.h>
+ 
+ /* I_STAT is owned by memory.c */
+ extern uint32_t i_stat;
+@@ -1916,8 +1917,49 @@ static void mc_process_byte(uint8_t tx_byte) {
+         sio_rx_data = 0x00;
+         sio_stat |= SIO_STAT_ACK;
+ 
++        {
++            /* Diagnostico opcional (PSX_MC_WRITE_LOG=1): compara el checksum
++             * interno del frame (XOR 0x00..0x7E contra el byte 0x7F) con el de
++             * transaccion SIO. Desactivado por defecto; no registra contenidos. */
++            static int mc_log = -1;
++            if (mc_log < 0) {
++                const char* e = getenv("PSX_MC_WRITE_LOG");
++                mc_log = (e && e[0] && e[0] != '0') ? 1 : 0;
++            }
++            if (mc_log) {
++                uint8_t inner = 0;
++                for (int i = 0; i < 127; i++) inner ^= mc_data[i];
++                fprintf(stderr,
++                    "[MCW] sec=%d stored7f=0x%02X xor0_7E=0x%02X match=%d "
++                    "tx_chk=0x%02X exp_chk=0x%02X chk_ok=%d\n",
++                    mc_sector, mc_data[127], inner, inner == mc_data[127],
++                    tx_byte, expected, tx_byte == expected);
++                fflush(stderr);
++            }
++        }
++
+         if (tx_byte == expected && mc_sector < MEMCARD_SECTORS) {
+-            if (memcard_write_sector(mc_slot, mc_sector, mc_data) == 0) {
++            /* Chequeo del checksum INTERNO del frame (XOR 0x00..0x7E == byte 0x7F).
++             * Una tarjeta real lo verifica al escribir y rechaza el frame; este
++             * runtime lo acepta siempre. Se expone como modo estricto opt-in
++             * (PSX_MC_STRICT_FRAME_CHK=1) para poder diagnosticar sin cambiar el
++             * comportamiento por defecto, que hoy permite guardar al juego. */
++            /* Sin cache: se consulta en cada escritura (son poco frecuentes) para
++             * que el modo pueda cambiarse en pruebas dentro del mismo proceso. */
++            int strict;
++            {
++                const char* e = getenv("PSX_MC_STRICT_FRAME_CHK");
++                strict = (e && e[0] && e[0] != '0') ? 1 : 0;
++            }
++            int frame_ok = 1;
++            if (strict) {
++                uint8_t inner = 0;
++                for (int i = 0; i < 127; i++) inner ^= mc_data[i];
++                frame_ok = (inner == mc_data[127]);
++            }
++            if (!frame_ok) {
++                mc_checksum = 0x4E; /* frame con checksum interno invalido */
++            } else if (memcard_write_sector(mc_slot, mc_sector, mc_data) == 0) {
+                 memcard_flush(mc_slot);
+                 mc_checksum = memcard_last_flush_result(mc_slot) == 0
+                     ? 0x47 : 0x4E; /* Good / write failed */
+diff --git a/runtime/tests/test_sio_card_protocol.c b/runtime/tests/test_sio_card_protocol.c
+index 62fec5d2..3f05f1d7 100644
+--- a/runtime/tests/test_sio_card_protocol.c
++++ b/runtime/tests/test_sio_card_protocol.c
+@@ -322,6 +322,53 @@ static void test_flag_clears_on_write(void) {
+     EXPECT_EQ("post_write.flag_clear",   0x00, card_xchg(0x52, 0));
+ }
+ 
++/* Checksum INTERNO del frame (XOR 0x00..0x7E frente al byte 0x7F).
++ * Por defecto el runtime lo acepta (comportamiento historico, permite guardar);
++ * con PSX_MC_STRICT_FRAME_CHK=1 se rechaza como haria una tarjeta real. */
++static void test_frame_internal_checksum_modes(void) {
++    uint8_t data[128], rx[140], stored[128];
++
++    sio_init();
++    unsetenv("PSX_MC_STRICT_FRAME_CHK");
++    memcard_init("test_dir");
++
++    /* Frame deliberadamente incoherente: 0x7F no es el XOR de 0x00..0x7E. */
++    memset(data, 0x5A, sizeof data);
++    data[127] = 0x00;
++    EXPECT_EQ("frame.default.count", 138, run_card_write(0, 0x0040, data, rx));
++    EXPECT_EQ("frame.default.end", 0x47, rx[137]);   /* aceptado por defecto */
++
++    memset(stored, 0, sizeof stored);
++    FILE* f = fopen("test_dir/card1.mcd", "rb");
++    if (f) { fseek(f, 0x40 * 128, SEEK_SET); (void)fread(stored, 1, 128, f); fclose(f); }
++    EXPECT_EQ("frame.default.stored_verbatim", 0, memcmp(stored, data, 128));
++
++    /* Modo estricto: el mismo tipo de frame se rechaza y la tarjeta no cambia. */
++    setenv("PSX_MC_STRICT_FRAME_CHK", "1", 1);
++    uint8_t bad[128];
++    memset(bad, 0xA5, sizeof bad);
++    bad[127] = 0x11;
++    EXPECT_EQ("frame.strict.count", 138, run_card_write(0, 0x0041, bad, rx));
++    EXPECT_EQ("frame.strict.end", 0x4E, rx[137]);    /* rechazado */
++
++    memset(stored, 0, sizeof stored);
++    f = fopen("test_dir/card1.mcd", "rb");
++    if (f) { fseek(f, 0x41 * 128, SEEK_SET); (void)fread(stored, 1, 128, f); fclose(f); }
++    EXPECT_EQ("frame.strict.not_written", 1, memcmp(stored, bad, 128) != 0);
++
++    /* Modo estricto con frame coherente: se acepta. */
++    uint8_t good[128];
++    memset(good, 0x33, sizeof good);
++    uint8_t x = 0;
++    for (int i = 0; i < 127; i++) x ^= good[i];
++    good[127] = x;
++    (void)run_card_write(0, 0x0042, good, rx);
++    EXPECT_EQ("frame.strict_valid.end", 0x47, rx[137]);
++
++    unsetenv("PSX_MC_STRICT_FRAME_CHK");
++    memcard_init("test_dir");
++}
++
+ static int accept_extension(int card, const uint8_t* base, const uint8_t* tail,
+                             uint32_t size) {
+     (void)card; (void)base; (void)tail; (void)size;
+@@ -532,6 +579,12 @@ int main(int argc, char **argv) {
+ 
+     test_rejected_save_reports_failure();
+ 
++    prev_checks = g_checks; prev_fails = g_failures;
++    test_frame_internal_checksum_modes();
++    fprintf(stderr, "test_frame_internal_checksum_modes: %d/%d ok\n",
++            (g_checks - prev_checks) - (g_failures - prev_fails),
++            g_checks - prev_checks);
++
+     prev_checks = g_checks; prev_fails = g_failures;
+     test_pad_poll_during_card_read();
+     fprintf(stderr, "test_pad_poll_during_card_read:     %d/%d ok\n",

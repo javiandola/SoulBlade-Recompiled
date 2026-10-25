@@ -1,0 +1,93 @@
+From daa85f7ac39025106493da5f8b9f72966a51f787 Mon Sep 17 00:00:00 2001
+From: SoulBlade Port <port@localhost>
+Date: Sun, 25 Oct 2026 01:24:07 +0200
+Subject: [PATCH 2/4] tests: stub de memcard_last_flush_result en los 5 targets
+ que no enlazaban
+
+sio.c consulta el resultado del volcado tras escribir una tarjeta, pero cinco
+tests que compilan sio.c solo stubbeaban memcard_flush/write_sector, asi que
+esos targets no enlazaban en esta revision (fallo preexistente). Con el stub,
+10/10 pruebas del area sio/card pasan.
+---
+ runtime/tests/test_psx_pad_apply.c          | 1 +
+ runtime/tests/test_sio_card_irq_integrity.c | 3 +++
+ runtime/tests/test_sio_digital_command.c    | 1 +
+ runtime/tests/test_sio_dualshock_rumble.c   | 1 +
+ runtime/tests/test_sio_jogcon_protocol.c    | 1 +
+ runtime/tests/test_sio_negcon_protocol.c    | 1 +
+ 6 files changed, 8 insertions(+)
+
+diff --git a/runtime/tests/test_psx_pad_apply.c b/runtime/tests/test_psx_pad_apply.c
+index 4281ef13..d4e9ec7b 100644
+--- a/runtime/tests/test_psx_pad_apply.c
++++ b/runtime/tests/test_psx_pad_apply.c
+@@ -57,6 +57,7 @@ int memcard_write_sector(int card, int sector, const uint8_t *buf) {
+     (void)card; (void)sector; (void)buf; return -1;
+ }
+ void memcard_flush(int card) { (void)card; }
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ #define SIO_TX_DATA 0x1F801040u
+ #define SIO_RX_DATA 0x1F801040u
+diff --git a/runtime/tests/test_sio_card_irq_integrity.c b/runtime/tests/test_sio_card_irq_integrity.c
+index 0a4f3e83..ce949a3d 100644
+--- a/runtime/tests/test_sio_card_irq_integrity.c
++++ b/runtime/tests/test_sio_card_irq_integrity.c
+@@ -45,6 +45,9 @@ int memcard_write_sector(int slot, int sector, const uint8_t *buf) {
+     (void)slot; (void)sector; (void)buf; return 0;
+ }
+ void memcard_flush(int slot) { (void)slot; }
++/* Stub que faltaba: sio.c consulta el resultado del volcado tras escribir.
++ * Sin el, este target de test no enlazaba (fallo preexistente en esta revision). */
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ static void check(const char *name, int ok) {
+     checks++; if (!ok) failures++;
+diff --git a/runtime/tests/test_sio_digital_command.c b/runtime/tests/test_sio_digital_command.c
+index 0293b4e7..85b65ff3 100644
+--- a/runtime/tests/test_sio_digital_command.c
++++ b/runtime/tests/test_sio_digital_command.c
+@@ -56,6 +56,7 @@ int memcard_write_sector(int card, int sector, const uint8_t *buf) {
+     (void)card; (void)sector; (void)buf; return -1;
+ }
+ void memcard_flush(int card) { (void)card; }
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ 
+ #define DATA 0x1F801040u
+diff --git a/runtime/tests/test_sio_dualshock_rumble.c b/runtime/tests/test_sio_dualshock_rumble.c
+index 65cf5cf1..19c9b7ff 100644
+--- a/runtime/tests/test_sio_dualshock_rumble.c
++++ b/runtime/tests/test_sio_dualshock_rumble.c
+@@ -57,6 +57,7 @@ int memcard_write_sector(int card, int sector, const uint8_t *buf) {
+     (void)card; (void)sector; (void)buf; return -1;
+ }
+ void memcard_flush(int card) { (void)card; }
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ #define SIO_TX_DATA 0x1F801040u
+ #define SIO_RX_DATA 0x1F801040u
+diff --git a/runtime/tests/test_sio_jogcon_protocol.c b/runtime/tests/test_sio_jogcon_protocol.c
+index e49a90f3..47787417 100644
+--- a/runtime/tests/test_sio_jogcon_protocol.c
++++ b/runtime/tests/test_sio_jogcon_protocol.c
+@@ -57,6 +57,7 @@ int memcard_write_sector(int card, int sector, const uint8_t *buf) {
+     (void)card; (void)sector; (void)buf; return -1;
+ }
+ void memcard_flush(int card) { (void)card; }
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ #define SIO_TX_DATA 0x1F801040u
+ #define SIO_RX_DATA 0x1F801040u
+diff --git a/runtime/tests/test_sio_negcon_protocol.c b/runtime/tests/test_sio_negcon_protocol.c
+index 94d5304e..3298b61e 100644
+--- a/runtime/tests/test_sio_negcon_protocol.c
++++ b/runtime/tests/test_sio_negcon_protocol.c
+@@ -59,6 +59,7 @@ int memcard_write_sector(int card, int sector, const uint8_t *buf) {
+     (void)card; (void)sector; (void)buf; return -1;
+ }
+ void memcard_flush(int card) { (void)card; }
++int memcard_last_flush_result(int card) { (void)card; return 0; }
+ 
+ #define SIO_TX_DATA 0x1F801040u
+ #define SIO_RX_DATA 0x1F801040u

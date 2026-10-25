@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Soul Blade Recompiled
+Comment=Port nativo de Soul Blade (PlayStation 1)
+Exec=SoulBlade_Recompiled
+Icon=soulblade
+Categories=Game;ActionGame;
+Terminal=false

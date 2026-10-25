@@ -1,0 +1,31 @@
+{
+  "cue_path": "Soul Blade (v1.1).cue",
+  "cue_name": "Soul Blade (v1.1).cue",
+  "bin_name": "Soul Blade (v1.1).bin",
+  "track_count": 1,
+  "data_track_size": 527412480,
+  "data_track_md5": "055175fbf6e6e48caea1fad0664f42af",
+  "data_track_sha1": "e1a48d3e5c3614be1a5f3fe7f1f4036dbc6c5b94",
+  "data_track_crc32": "aa74b3c9",
+  "boot_exe": "SLUS_002.40",
+  "serial": "SLUS-00240",
+  "serial_exe": "SLUS_002.40",
+  "volume_id": "SOULBLADE",
+  "display_name": "SoulBlade",
+  "load_address": "0x80010000",
+  "entry_pc": "0x80010FBC",
+  "text_size": "0x000FC000",
+  "stack_base": "0x801FFFF0",
+  "require_cue": true,
+  "required_disc_fp": "f28e869b8d07728a4b86cfe89a89872013f1a7331b483b1346677957205da19c",
+  "boot_exe_sha256": "51b14b312a79f5aec13167cfc6426c97baf0ff713cfc66e9ab4d28991a8f3b6e",
+  "seed_count": 1453,
+  "warnings": [
+    "cue has only 1 TRACK \u2014 Track-01-only dumps fail multi-track netplay/catalog gates; prefer a full Redump cue."
+  ],
+  "notes": [
+    "entry_pc/load_address/text_size/stack_base taken from PS-X EXE header.",
+    "seeds are first-pass boot-EXE JAL targets (+ entry); expect to grow as overlays / runtime paths are discovered.",
+    "required_disc_fp is psxrecomp-toc-v1 (matches runtime DiscIdentity)."
+  ]
+}
