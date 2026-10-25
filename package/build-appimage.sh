@@ -81,7 +81,10 @@ rm -rf "$PAYLOAD"
 mkdir -p "$PAYLOAD/disc" "$PAYLOAD/assets" "$PAYLOAD/bios"
 cp "$RELEASE/SoulBlade_Recompiled" "$RELEASE/SoulBlade_Recompiled.execution.json" "$PAYLOAD/"
 cp "$RELEASE/bios/openbios.bin" "$RELEASE/bios/OpenBIOS.LICENSE" "$PAYLOAD/bios/"
-cp "$RELEASE/assets/psxrecomp.png" "$PAYLOAD/assets/"
+ICON="$RELEASE/assets/psxrecomp.png"
+[ -f "$ICON" ] || ICON="$PSXRECOMP/assets/psxrecomp.png"
+[ -f "$ICON" ] || die "no encuentro psxrecomp.png ni en el build ni en el framework"
+cp "$ICON" "$PAYLOAD/assets/"
 cp "$RELEASE/game.toml" "$RELEASE/game_options.toml" "$PAYLOAD/"
 # game.toml del paquete: sin rutas del equipo de desarrollo. La clave `disc`
 # solo la usa el recompilador; el runtime recibe --disc desde el AppRun.
